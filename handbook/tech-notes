@@ -11,6 +11,7 @@
 #   ./tech-notes [--check|--fix|--new|--help]
 
 TECH_NOTES_DIR="engineering/tech-notes"
+POSTMORTEMS_DIR="$TECH_NOTES_DIR/postmortems"
 OUTPUT_FILE="engineering/tech-notes.mdx"
 
 # Colors for output
@@ -166,14 +167,15 @@ Welcome to Polar Tech Notes! Here you'll find technical deep-dives, debugging st
 >
   $description
 
-  **Author:** $author • **Published:** $date
+**Author:** $author • **Published:** $date
+
 </Card>
 
 "
             is_first=false
         else
             # Other posts as bullet points
-            bullet_posts+="- [$title](/engineering/tech-notes/$filename) - $description (*$author*, $date)
+            bullet_posts+="- [$title](/engineering/tech-notes/$filename) - $description (_${author}_, $date)
 "
         fi
     done < <(sort -t'|' -k1,1r "$temp_file")
@@ -186,6 +188,26 @@ $bullet_posts
 "
     fi
 
+    # Post-mortems, newest first (file names are dates)
+    local postmortem_posts=""
+    for file in $(ls -r "$POSTMORTEMS_DIR"/*.mdx 2>/dev/null); do
+        local title=$(extract_frontmatter "$file" "title")
+        local description=$(extract_frontmatter "$file" "description")
+        [ -z "$title" ] && continue
+
+        postmortem_posts+="- [$title](/engineering/tech-notes/postmortems/$(get_filename "$file")) - $description
+"
+    done
+
+    if [ -n "$postmortem_posts" ]; then
+        output_content+="---
+
+## Post-mortems
+
+$postmortem_posts
+"
+    fi
+
     # Clean up temp file
     rm -f "$temp_file"
 
@@ -195,6 +217,7 @@ $bullet_posts
 ## About Our Tech Notes
 
 Our tech notes document:
+
 - **Technical Investigations**: Deep-dives into complex problems and their solutions
 - **Debugging Stories**: Real-world debugging scenarios and methodologies
 - **Performance Optimizations**: How we improve system performance and scalability
