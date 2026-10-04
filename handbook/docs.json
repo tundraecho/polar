@@ -72,7 +72,8 @@
               "engineering/backend-development/operational-errors",
               "engineering/backend-development/metadata",
               "engineering/backend-development/tinybird",
-              "engineering/backend-development/account-payout-account"
+              "engineering/backend-development/account-payout-account",
+              "engineering/backend-development/local-development-faq"
             ]
           },
           {
@@ -124,7 +125,6 @@
             "group": "On-Call Procedures",
             "pages": [
               "engineering/oncall/introduction",
-              "engineering/oncall/developer-faq",
               "engineering/oncall/merge-accounts",
               "engineering/oncall/deploy-infra",
               "engineering/oncall/trigger-webhooks",
@@ -141,5 +141,11 @@
         ]
       }
     ]
-  }
+  },
+  "redirects": [
+    {
+      "source": "/engineering/oncall/developer-faq",
+      "destination": "/engineering/backend-development/local-development-faq"
+    }
+  ]
 }
