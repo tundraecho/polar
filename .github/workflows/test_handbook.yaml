@@ -1,0 +1,46 @@
+name: Handbook
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    types: [opened, synchronize, edited]
+  merge_group:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: "Detect changes"
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    outputs:
+      tech_notes: ${{ steps.filter.outputs.tech_notes }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: dorny/paths-filter@v4.0.3
+        id: filter
+        with:
+          filters: |
+            tech_notes:
+              - 'handbook/tech-notes'
+              - 'handbook/engineering/tech-notes.mdx'
+              - 'handbook/engineering/tech-notes/**'
+              - '.github/workflows/test_handbook.yaml'
+
+  listing:
+    name: "Tech notes: Listing up to date 📝"
+    needs: changes
+    if: needs.changes.outputs.tech_notes == 'true'
+    timeout-minutes: 5
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Check tech notes listing
+        working-directory: ./handbook
+        run: ./tech-notes --check
