@@ -9,8 +9,11 @@ right project. `dev docker up` starts shared (if needed) then this instance.
 
 import json
 import os
+import platform
 import re
+import shlex
 import shutil
+import signal
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -591,6 +594,54 @@ def _build_images_cmd(
     return base_cmd + ["build"] + (["--pull"] if pull else []) + (services or [])
 
 
+def _login_code_notifier_pipeline(instance: int) -> tuple[str, dict[str, str]]:
+    cmd = _build_compose_cmd(instance) + ["logs", "-f", "--tail", "0", "api"]
+    notifier = ROOT_DIR / "dev" / "email_login_code_notifier.py"
+    pipeline = f"{shlex.join(cmd)} | {shlex.join([sys.executable, str(notifier)])}"
+    return pipeline, _build_compose_env(instance)
+
+
+def _login_code_notifier_pidfile(instance: int) -> Path:
+    return REGISTRY_FILE.parent / f"login-code-notifier-{instance}.pid"
+
+
+def _login_code_notifier_pid(instance: int) -> int | None:
+    pidfile = _login_code_notifier_pidfile(instance)
+    try:
+        pid = int(pidfile.read_text())
+        command = subprocess.run(
+            ["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True
+        ).stdout
+    except (OSError, ValueError):
+        return None
+    return pid if "email_login_code_notifier" in command else None
+
+
+def _start_login_code_notifier(instance: int) -> None:
+    if platform.system() != "Darwin" or _login_code_notifier_pid(instance):
+        return
+    pipeline, env = _login_code_notifier_pipeline(instance)
+    process = subprocess.Popen(
+        ["sh", "-c", pipeline],
+        env={**os.environ, **env},
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    pidfile = _login_code_notifier_pidfile(instance)
+    pidfile.parent.mkdir(parents=True, exist_ok=True)
+    pidfile.write_text(str(process.pid))
+    console.print("[dim]Login codes will show as macOS notifications[/dim]")
+
+
+def _stop_login_code_notifier(instance: int) -> None:
+    pid = _login_code_notifier_pid(instance)
+    if pid:
+        os.killpg(pid, signal.SIGTERM)
+    _login_code_notifier_pidfile(instance).unlink(missing_ok=True)
+
+
 def _get_instance(ctx: typer.Context) -> int:
     # Every caller (action commands) passes ENV_FILE to docker compose via
     # `--env-file`, so the file must exist. Read-only commands like `list`
@@ -724,6 +775,14 @@ def register(app: typer.Typer, prompt_setup: callable) -> None:
                 "--monitoring", help="Include Prometheus and Grafana in shared infra"
             ),
         ] = False,
+        notify: Annotated[
+            bool,
+            typer.Option(
+                "--notify/--no-notify",
+                envvar="POLAR_DEV_LOGIN_CODE_NOTIFY",
+                help="Show login codes as macOS notifications (macOS only)",
+            ),
+        ] = True,
         services: Annotated[
             list[str] | None,
             typer.Argument(help="Services to start (default: all app services)"),
@@ -780,6 +839,8 @@ def register(app: typer.Typer, prompt_setup: callable) -> None:
             result = run_command(up_cmd, env=env)
             if result and result.returncode == 0:
                 _print_access_info(ctx, instance)
+                if notify:
+                    _start_login_code_notifier(instance)
             else:
                 console.print("[red]Failed to start services[/red]")
                 raise typer.Exit(1)
@@ -805,6 +866,7 @@ def register(app: typer.Typer, prompt_setup: callable) -> None:
         env = _build_compose_env(instance)
         cmd = _build_compose_cmd(instance) + ["down"] + (services or [])
         console.print(f"[dim]Stopping app stack (instance {instance})...[/dim]")
+        _stop_login_code_notifier(instance)
         result = run_command(cmd, env=env)
         if not result or result.returncode != 0:
             console.print("[red]Failed to stop app stack[/red]")
@@ -850,6 +912,25 @@ def register(app: typer.Typer, prompt_setup: callable) -> None:
             cmd.append(service)
         full_env = {**os.environ, **env}
         os.execvpe(cmd[0], cmd, full_env)
+
+    @docker_app.command("notify")
+    def docker_notify(ctx: typer.Context) -> None:
+        """Follow the API logs and notify with each new login code (macOS).
+
+        `dev docker up` already does this in the background on macOS.
+        """
+        if platform.system() != "Darwin":
+            err_console.print("[red]Login code notifications need macOS[/red]")
+            raise typer.Exit(1)
+        instance = _get_instance(ctx)
+        if _login_code_notifier_pid(instance):
+            err_console.print(
+                "[yellow]Already running in the background (started by "
+                "`dev docker up`); a second one would notify twice[/yellow]"
+            )
+            raise typer.Exit(1)
+        pipeline, env = _login_code_notifier_pipeline(instance)
+        os.execvpe("sh", ["sh", "-c", pipeline], {**os.environ, **env})
 
     @docker_app.command("ps")
     def docker_ps(ctx: typer.Context) -> None:
