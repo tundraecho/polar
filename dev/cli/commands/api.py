@@ -1,12 +1,16 @@
 """Start the backend API server."""
 
 import os
+import platform
+import shlex
+import sys
 from typing import Annotated
 
 import typer
 
 from shared import (
     DEFAULT_API_PORT,
+    ROOT_DIR,
     SERVER_DIR,
     console,
     find_available_port,
@@ -45,4 +49,13 @@ def register(app: typer.Typer, prompt_setup: callable) -> None:
         ]
 
         os.environ["AUTHLIB_INSECURE_TRANSPORT"] = "true"
+
+        if platform.system() == "Darwin":
+            notifier = ROOT_DIR / "dev" / "email_login_code_notifier.py"
+            pipeline = (
+                f"{shlex.join([*cmd, '--use-colors'])} 2>&1 "
+                f"| {shlex.join([sys.executable, str(notifier)])}"
+            )
+            os.execvp("sh", ["sh", "-c", pipeline])
+
         os.execvp(cmd[0], cmd)
